@@ -6,7 +6,7 @@ Usage:
     python predict.py match <home> <away> [--as-of YYYY-MM-DD]
     python predict.py table [--season 2026] [--as-of YYYY-MM-DD]
     python predict.py simulate [--season 2026] [--as-of YYYY-MM-DD] [--sims 10000] [--relegation 3]
-    python predict.py backtest [--season 2025] [--tune 2024] [--xi 0.0019] [--ridge 0.5]
+    python predict.py backtest [--season 2025] [--tune 2024] [--xi 0.0019] [--ridge 4]
 """
 
 import argparse
@@ -189,7 +189,7 @@ def cmd_simulate(args):
 
 # Values tried by `backtest --tune`.
 XI_GRID = [0.0005, 0.001, 0.0019, 0.003, 0.005]
-RIDGE_GRID = [0.25, 0.5, 1.0, 2.0, 4.0]
+RIDGE_GRID = [0.5, 1.0, 2.0, 4.0, 8.0]
 
 
 def print_scores(scores):
@@ -293,7 +293,7 @@ def build_parser():
     backtest.add_argument("--tune", type=int, default=None, metavar="SEASON",
                           help="first choose xi and ridge by grid search on this earlier season")
     backtest.add_argument("--xi", type=float, default=0.0019, help="time decay per day")
-    backtest.add_argument("--ridge", type=float, default=0.5, help="ridge penalty")
+    backtest.add_argument("--ridge", type=float, default=4.0, help="ridge penalty")
     backtest.set_defaults(run=cmd_backtest)
     return parser
 
