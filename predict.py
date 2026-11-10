@@ -57,6 +57,10 @@ def cmd_ratings(args):
     missing = sorted(set(teams) - set(table["team"]))
     if missing:
         print(f"\nNo matches yet (treated as slightly below average): {', '.join(missing)}")
+    path = charts.ratings_chart(
+        table, "Süper Lig club ratings",
+        f"Dixon-Coles model fitted on matches before {model.as_of:%d %b %Y}")
+    print(f"\nChart saved to {path}")
 
 
 def cmd_match(args):
@@ -169,7 +173,13 @@ def cmd_simulate(args):
     charts.OUTPUT_DIR.mkdir(exist_ok=True)
     summary.to_csv(charts.OUTPUT_DIR / f"forecast_{season}.csv", index=False)
     position_probs.to_csv(charts.OUTPUT_DIR / f"positions_{season}.csv", index_label="team")
-    print(f"\nSaved forecast_{season}.csv and positions_{season}.csv to {charts.OUTPUT_DIR}")
+    title = f"Süper Lig {data.season_label(season)} forecast"
+    subtitle = (f"{args.sims:,} simulations of the remaining {left} matches, "
+                f"model fitted on matches before {model.as_of:%d %b %Y}")
+    charts.forecast_chart(summary, title, subtitle, f"forecast_{season}.png")
+    charts.position_heatmap(position_probs, title, subtitle, f"positions_{season}.png")
+    print(f"\nSaved forecast_{season} and positions_{season} (.csv and .png) "
+          f"to {charts.OUTPUT_DIR}")
 
     whole_season = season_matches(matches, season)
     is_finished = len(whole_season) == len(teams) * (len(teams) - 1)
@@ -226,6 +236,14 @@ def cmd_backtest(args):
     path = charts.OUTPUT_DIR / f"backtest_{args.season}.csv"
     predictions.to_csv(path, index=False, encoding="utf-8", float_format="%.4f")
     print(f"\nSaved predictions to {path}")
+    calibrations = {evaluate.FORECASTERS[key]: evaluate.calibration(predictions, key)
+                    for key in ("model", "book")}
+    chart = charts.backtest_chart(
+        evaluate.score_table(predictions), calibrations,
+        f"Backtest {data.season_label(args.season)}",
+        f"{len(predictions)} matches, each predicted using only earlier matches",
+        f"backtest_{args.season}.png")
+    print(f"Chart saved to {chart}")
 
 
 def parse_date(text):
