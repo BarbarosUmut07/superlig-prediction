@@ -114,7 +114,7 @@ class DixonColes:
     ridge: penalty on attack² and defence², pulls clubs towards average.
     """
 
-    def __init__(self, xi=0.0019, ridge=0.5):
+    def __init__(self, xi=0.0019, ridge=4.0):
         self.xi = xi
         self.ridge = ridge
         self.attack = {}

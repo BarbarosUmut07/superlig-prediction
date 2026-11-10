@@ -40,7 +40,7 @@ The parameters are found by maximising the likelihood of all past matches, with 
 
 - **Time decay.** A match played `d` days ago has weight `exp(-0.0019 · d)`, so a match
   one year old counts about half as much as one played yesterday.
-- **Ridge penalty.** `0.5 · (Σ attack² + Σ defence²)` is added to the loss. It pulls clubs
+- **Ridge penalty.** `4 · (Σ attack² + Σ defence²)` is added to the loss. It pulls clubs
   with few matches, such as newly promoted ones, towards the league average.
 
 The fitted home advantage is 0.24, which means the home side scores about 27% more goals
@@ -61,7 +61,7 @@ the same 306 matches.
 | Forecaster  | RPS    | Log loss | Brier  | Accuracy |
 |-------------|--------|----------|--------|----------|
 | Baseline    | 0.2250 | 1.0861   | 0.6578 | 42.2%    |
-| Dixon-Coles | 0.1937 | 0.9923   | 0.5941 | 52.0%    |
+| Dixon-Coles | 0.1942 | 0.9940   | 0.5954 | 51.6%    |
 | Bookmakers  | 0.1860 | 0.9695   | 0.5790 | 54.2%    |
 
 The baseline is the league's home/draw/away frequencies from earlier seasons. Bookmaker
@@ -69,18 +69,29 @@ probabilities are `1/odds`, normalised to remove the margin. RPS (ranked probabi
 score) is the main metric; lower is better.
 
 The model is clearly better than the baseline and worse than the bookmakers. It closes
-about 80% of the gap between the two. The picture is the same in 2023/24 (0.1965 against
-0.1870) and 2024/25 (0.1979 against 0.1827).
+about 80% of the gap between the two. The picture is the same in 2023/24 (0.1963 against
+0.1870) and 2024/25 (0.1972 against 0.1827).
 
 ![Backtest](output/backtest_2025.png)
 
-The time decay and ridge penalty were tuned by grid search on 2024/25 and then checked on
-2025/26. The tuned values were slightly worse on the later season than the defaults
-(0.1946 against 0.1937), so the defaults were kept.
+### Choosing the time decay and the ridge penalty
+
+A grid search on 2024/25 alone picked a faster decay (0.005) and a ridge of 2. On the
+untouched 2025/26 season that choice scored 0.1946, no better than the defaults, so a
+single season is too noisy to tune on.
+
+The ridge penalty was later raised from 0.5 to 4 for a different reason. With 0.5 the
+model rated promoted clubs on very little evidence: after 11 matches of 2026/27 it made
+Amedspor the second favourite for the title, far above what bookmakers implied. On the
+early-season matches of promoted clubs in 2019/20 to 2025/26 (289 matches), a ridge of 4
+improves the RPS from 0.2244 to 0.2164, and the average over all matches of those seven
+seasons improves slightly, from 0.2055 to 0.2047. This choice was made looking at all
+seven seasons, including 2025/26, so the table above is not a fully untouched test of it.
+On 2025/26 alone the change is within noise (0.1937 with 0.5, 0.1942 with 4).
 
 As a second check, the season forecast made with data up to 15 January 2026, exactly half
-way through 2025/26, was off by 3.7 points per club on average. It had the eventual
-champion as a 72% favourite.
+way through 2025/26, was off by 3.5 points per club on average. It had the eventual
+champion as a 71% favourite.
 
 ## Data
 
@@ -98,7 +109,9 @@ These count for the league table but are left out of the model fit.
 - The model only knows results. It knows nothing about injuries, transfers, coaching
   changes or line-ups, so a club's improvement only shows after the results do. Bookmakers
   have all of that information, which is why matching them would already be a strong result.
-- Early in a season, promoted clubs are rated on very few matches.
+- Early in a season, promoted clubs are rated on very few matches. The ridge penalty
+  limits this, but the model still rates a fast-starting promoted club higher than
+  bookmakers do.
 - The percentile ranges reflect the luck of the remaining matches, not the uncertainty in
   the ratings themselves, so they are somewhat too narrow.
 - Point deductions are supported through `data/deductions.csv` (`season,team,points`), but

@@ -74,7 +74,7 @@ def baseline_probs(matches, season):
     return np.bincount(outcomes(earlier), minlength=3) / len(earlier)
 
 
-def walk_forward(matches, season, xi=0.0019, ridge=0.5):
+def walk_forward(matches, season, xi=0.0019, ridge=4.0):
     """Predict every match of `season` using only matches played before its day.
 
     For each match day the model is refitted (warm start from the previous
