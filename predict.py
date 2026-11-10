@@ -4,6 +4,7 @@ Usage:
     python predict.py fetch [--first 2015] [--last 2026]
     python predict.py ratings [--as-of YYYY-MM-DD]
     python predict.py match <home> <away> [--as-of YYYY-MM-DD]
+    python predict.py table [--season 2026] [--as-of YYYY-MM-DD]
 """
 
 import argparse
@@ -12,7 +13,9 @@ from datetime import date
 
 import numpy as np
 
-from predictor import charts, data
+import pandas as pd
+
+from predictor import charts, data, table
 from predictor.model import DixonColes
 
 
@@ -88,6 +91,35 @@ def cmd_match(args):
     print(f"\nChart saved to {charts.match_chart(model, home, away)}")
 
 
+def season_matches(matches, season, as_of=None):
+    """Return one season's matches, optionally only those before `as_of`."""
+    rows = matches[matches["season"] == season]
+    if as_of is not None:
+        rows = rows[rows["date"] < pd.Timestamp(as_of)]
+    return rows
+
+
+def print_table(standings):
+    """Print a league table built by table.league_table."""
+    print(f"{'':>3} {'club':<19}{'P':>3}{'W':>4}{'D':>4}{'L':>4}{'GF':>5}{'GA':>4}{'GD':>5}{'Pts':>5}")
+    for place, row in standings.iterrows():
+        print(f"{place:>3} {row.team:<19}{row.played:>3}{row.won:>4}{row.drawn:>4}{row.lost:>4}"
+              f"{row.gf:>5}{row.ga:>4}{row.gd:>+5}{row.points:>5}")
+
+
+def cmd_table(args):
+    """Print the league table of a season, with tie-breaks and deductions applied."""
+    matches = data.load_matches()
+    season = args.season if args.season is not None else season_on(matches, args.as_of)
+    teams = data.season_teams(matches, season)
+    deductions = table.load_deductions(season)
+    print(f"Süper Lig {data.season_label(season)}"
+          + (f", matches before {args.as_of}" if args.as_of else ""))
+    print_table(table.league_table(season_matches(matches, season, args.as_of), teams, deductions))
+    for team, points in deductions.items():
+        print(f"{team}: {points} points deducted")
+
+
 def parse_date(text):
     """Turn YYYY-MM-DD from the command line into a date."""
     return date.fromisoformat(text)
@@ -115,6 +147,12 @@ def build_parser():
     match.add_argument("--as-of", type=parse_date, default=None,
                        help="use only matches before this date (YYYY-MM-DD)")
     match.set_defaults(run=cmd_match)
+
+    standings = commands.add_parser("table", help="show a league table")
+    standings.add_argument("--season", type=int, default=None, help="season (start year)")
+    standings.add_argument("--as-of", type=parse_date, default=None,
+                           help="use only matches before this date (YYYY-MM-DD)")
+    standings.set_defaults(run=cmd_table)
     return parser
 
 
