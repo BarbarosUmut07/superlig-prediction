@@ -5,6 +5,7 @@ Usage:
     python predict.py ratings [--as-of YYYY-MM-DD]
     python predict.py match <home> <away> [--as-of YYYY-MM-DD]
     python predict.py table [--season 2026] [--as-of YYYY-MM-DD]
+    python predict.py simulate [--season 2026] [--as-of YYYY-MM-DD] [--sims 10000] [--relegation 3]
 """
 
 import argparse
@@ -15,7 +16,7 @@ import numpy as np
 
 import pandas as pd
 
-from predictor import charts, data, table
+from predictor import charts, data, simulate, table
 from predictor.model import DixonColes
 
 
@@ -120,6 +121,61 @@ def cmd_table(args):
         print(f"{team}: {points} points deducted")
 
 
+def print_forecast(summary):
+    """Print the simulation summary, one row per club."""
+    print(f"{'':>3} {'club':<16}{'P':>3}{'Pts':>5}{'xPts':>7}{'5%-95%':>9}{'xPos':>6}"
+          f"{'Champ':>7}{'Top 2':>7}{'Top 4':>7}{'Releg':>7}")
+    for place, row in enumerate(summary.itertuples(), start=1):
+        spread = f"{row.points_p5:.0f}-{row.points_p95:.0f}"
+        print(f"{place:>3} {row.team:<16}{row.played:>3}{row.points_now:>5}{row.exp_points:>7.1f}"
+              f"{spread:>9}{row.exp_position:>6.1f}{charts.percent(row.champion):>7}"
+              f"{charts.percent(row.top2):>7}{charts.percent(row.top4):>7}"
+              f"{charts.percent(row.relegation):>7}")
+
+
+def print_comparison(summary, final_table):
+    """Print the forecast next to the real final table and the average points error."""
+    real = final_table.reset_index(names="position").set_index("team")
+    print(f"\n{'club':<16}{'real pos':>9}{'real pts':>9}{'forecast':>9}{'error':>7}")
+    errors = []
+    for team in real.index:
+        expected = summary.set_index("team").loc[team, "exp_points"]
+        error = expected - real.loc[team, "points"]
+        errors.append(abs(error))
+        print(f"{team:<16}{real.loc[team, 'position']:>9}{real.loc[team, 'points']:>9}"
+              f"{expected:>9.1f}{error:>+7.1f}")
+    print(f"\nAverage points error per club: {np.mean(errors):.1f}")
+
+
+def cmd_simulate(args):
+    """Simulate the rest of a season and print each club's chances."""
+    matches = data.load_matches()
+    season = args.season if args.season is not None else season_on(matches, args.as_of)
+    teams = data.season_teams(matches, season)
+    if not teams:
+        sys.exit(f"Error: no matches for season {season}")
+    deductions = table.load_deductions(season)
+    known = season_matches(matches, season, args.as_of)
+    model = fit_model(matches, args.as_of)
+
+    left = len(teams) * (len(teams) - 1) - len(known)
+    print(f"Süper Lig {data.season_label(season)}: {len(known)} matches played, "
+          f"{left} simulated {args.sims} times\n")
+    summary, position_probs = simulate.simulate_season(
+        model, known, teams, args.sims, args.relegation, deductions)
+    print_forecast(summary)
+
+    charts.OUTPUT_DIR.mkdir(exist_ok=True)
+    summary.to_csv(charts.OUTPUT_DIR / f"forecast_{season}.csv", index=False)
+    position_probs.to_csv(charts.OUTPUT_DIR / f"positions_{season}.csv", index_label="team")
+    print(f"\nSaved forecast_{season}.csv and positions_{season}.csv to {charts.OUTPUT_DIR}")
+
+    whole_season = season_matches(matches, season)
+    is_finished = len(whole_season) == len(teams) * (len(teams) - 1)
+    if args.as_of is not None and is_finished:
+        print_comparison(summary, table.league_table(whole_season, teams, deductions))
+
+
 def parse_date(text):
     """Turn YYYY-MM-DD from the command line into a date."""
     return date.fromisoformat(text)
@@ -153,6 +209,14 @@ def build_parser():
     standings.add_argument("--as-of", type=parse_date, default=None,
                            help="use only matches before this date (YYYY-MM-DD)")
     standings.set_defaults(run=cmd_table)
+
+    sim = commands.add_parser("simulate", help="simulate the rest of a season")
+    sim.add_argument("--season", type=int, default=None, help="season (start year)")
+    sim.add_argument("--as-of", type=parse_date, default=None,
+                     help="pretend today is this date (YYYY-MM-DD)")
+    sim.add_argument("--sims", type=int, default=10_000, help="number of simulations")
+    sim.add_argument("--relegation", type=int, default=3, help="number of relegated clubs")
+    sim.set_defaults(run=cmd_simulate)
     return parser
 
 
