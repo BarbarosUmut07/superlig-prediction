@@ -6,6 +6,7 @@ Fallback source: openfootball (results only, one JSON per season, many seasons m
 A season is identified by its start year: 2015 means 2015/16.
 """
 
+import difflib
 import json
 import urllib.request
 from datetime import date
@@ -22,7 +23,14 @@ OPENFOOTBALL_URL = (
     "https://raw.githubusercontent.com/openfootball/football.json/master/{name}/tr.1.json"
 )
 
-COLUMNS = ["season", "date", "home", "away", "hg", "ag", "odds_h", "odds_d", "odds_a"]
+COLUMNS = ["season", "date", "home", "away", "hg", "ag", "odds_h", "odds_d", "odds_a",
+           "awarded"]
+
+# Clubs that withdrew during a season: season -> (clubs, date of withdrawal).
+# Their later matches were never played and were recorded as 3-0 defeats.
+# They count for the league table but say nothing about playing strength.
+# 2022/23: Hatayspor and Gaziantep FK withdrew after the earthquake of 6 Feb 2023.
+WITHDRAWALS = {2022: (["Hatayspor", "Gaziantep FK"], "2023-02-06")}
 
 # Odds column sets in order of preference: market average (new name), market
 # average (old "BetBrain" name), Bet365, Pinnacle.
@@ -92,6 +100,43 @@ def clean_name(name):
     """Return the single spelling we use for a club."""
     name = str(name).strip()
     return ALIASES.get(name, name)
+
+
+def simplify(name):
+    """Lower-case a name and replace Turkish letters, so 'Fenerbahçe' -> 'fenerbahce'."""
+    # "İ".lower() gives "i" plus a combining dot (U+0307), which we delete.
+    return name.lower().translate(str.maketrans("çğıöşü", "cgiosu", "\u0307"))
+
+
+def find_team(query, teams):
+    """Return the club in `teams` that best matches what the user typed.
+
+    Tries, in order: exact name, start of the name, part of the name, closest
+    spelling. Raises ValueError if nothing fits or the query is ambiguous.
+    """
+    wanted = simplify(query.strip())
+    simple = {team: simplify(team) for team in teams}
+    exact = [team for team in teams if simple[team] == wanted]
+    starts = [team for team in teams if simple[team].startswith(wanted)]
+    contains = [team for team in teams if wanted in simple[team]]
+    close = difflib.get_close_matches(wanted, simple.values(), n=1, cutoff=0.6)
+    similar = [team for team in teams if simple[team] in close]
+    for candidates in (exact, starts, contains, similar):
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise ValueError(f"'{query}' is ambiguous: {', '.join(candidates)}")
+    raise ValueError(f"no club matches '{query}'")
+
+
+def mark_awarded(matches):
+    """Add the boolean column `awarded`: True for matches decided without being played."""
+    matches["awarded"] = False
+    for season, (clubs, withdrawal_date) in WITHDRAWALS.items():
+        involved = matches["home"].isin(clubs) | matches["away"].isin(clubs)
+        after = matches["date"] > pd.Timestamp(withdrawal_date)
+        matches.loc[(matches["season"] == season) & involved & after, "awarded"] = True
+    return matches
 
 
 def download(url, path, use_cache):
@@ -170,7 +215,7 @@ def parse_openfootball(path, season):
             }
         )
     print(f"  openfootball: {len(rows)} played matches (no odds)")
-    return pd.DataFrame(rows, columns=COLUMNS)
+    return pd.DataFrame(rows, columns=COLUMNS[:-1])
 
 
 def fetch_season(season, is_finished):
@@ -193,7 +238,7 @@ def fetch_season(season, is_finished):
         return parse_openfootball(json_path, season)
     except Exception as error:
         print(f"  openfootball failed ({error}); season skipped")
-        return pd.DataFrame(columns=COLUMNS)
+        return pd.DataFrame(columns=COLUMNS[:-1])
 
 
 def fetch_all(first=2015, last=None):
@@ -206,6 +251,7 @@ def fetch_all(first=2015, last=None):
         seasons.append(fetch_season(season, is_finished=season < current))
     matches = pd.concat([s for s in seasons if len(s)], ignore_index=True)
     matches = matches.sort_values(["date", "home"], kind="stable").reset_index(drop=True)
+    matches = mark_awarded(matches)
     MATCHES_CSV.parent.mkdir(parents=True, exist_ok=True)
     matches.to_csv(MATCHES_CSV, index=False, encoding="utf-8")
     return matches
@@ -242,11 +288,11 @@ def print_summary(matches):
     """Print matches per season, the date range and the club names per season."""
     print(f"\n{len(matches)} matches from {matches['date'].min():%Y-%m-%d} "
           f"to {matches['date'].max():%Y-%m-%d}\n")
-    print(f"{'season':<9}{'matches':>8}{'clubs':>7}{'with odds':>11}   first .. last")
+    print(f"{'season':<9}{'matches':>8}{'clubs':>7}{'with odds':>11}{'awarded':>9}   first .. last")
     for season, rows in matches.groupby("season"):
         clubs = len(season_teams(matches, season))
         print(f"{season_label(season):<9}{len(rows):>8}{clubs:>7}"
-              f"{int(rows['odds_h'].notna().sum()):>11}   "
+              f"{int(rows['odds_h'].notna().sum()):>11}{int(rows['awarded'].sum()):>9}   "
               f"{rows['date'].min():%Y-%m-%d} .. {rows['date'].max():%Y-%m-%d}")
     print("\nClub names per season:")
     for season in sorted(matches["season"].unique()):
